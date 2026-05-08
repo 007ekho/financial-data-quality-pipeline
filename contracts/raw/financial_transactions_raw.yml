@@ -1,0 +1,136 @@
+# contracts/raw/financial_transactions_raw.yml
+# Soda Core 4.0 Data Contract
+# Dataset: financial_transactions (Snowflake RAW schema)
+# Checkpoint: post-Snowpipe, pre-transform
+# Owner: Data Platform Team
+# Schedule: nightly, checked after 02:00 load
+
+dataset: financial_transactions
+
+schema:
+  columns:
+    - name: transaction_id      { data_type: VARCHAR,       nullable: false }
+    - name: account_id          { data_type: VARCHAR,       nullable: false }
+    - name: counterparty_id     { data_type: VARCHAR,       nullable: false }
+    - name: transaction_type    { data_type: VARCHAR,       nullable: false }
+    - name: amount              { data_type: FLOAT,         nullable: false }
+    - name: currency            { data_type: VARCHAR,       nullable: false }
+    - name: status              { data_type: VARCHAR,       nullable: false }
+    - name: channel             { data_type: VARCHAR,       nullable: false }
+    - name: merchant_category   { data_type: VARCHAR,       nullable: true  }
+    - name: initiated_at        { data_type: TIMESTAMP_NTZ, nullable: false }
+    - name: settled_at          { data_type: TIMESTAMP_NTZ, nullable: true  }
+    - name: is_flagged          { data_type: BOOLEAN,       nullable: false }
+    - name: flag_reason         { data_type: VARCHAR,       nullable: true  }
+    - name: source_system       { data_type: VARCHAR,       nullable: false }
+    - name: ingested_at         { data_type: TIMESTAMP_NTZ, nullable: false }
+
+checks:
+
+  # ── Schema drift ─────────────────────────────────────────────────────────────
+  - schema:
+      name: "Schema matches contract — no drift"
+      fail:
+        when required column missing:
+          - transaction_id
+          - account_id
+          - counterparty_id
+          - transaction_type
+          - amount
+          - currency
+          - status
+          - initiated_at
+          - is_flagged
+          - source_system
+          - ingested_at
+        when wrong column type:
+          initiated_at: TIMESTAMP_NTZ
+          ingested_at:  TIMESTAMP_NTZ
+          is_flagged:   BOOLEAN
+          amount:       FLOAT
+
+  # ── Freshness: nightly load must have arrived since midnight ──────────────────
+  - freshness(ingested_at) < 3h:
+      name: "Nightly load freshness: arrived within 3 hours"
+      fail: when > 3h
+      warn: when > 2h
+
+  # ── Completeness ─────────────────────────────────────────────────────────────
+  - missing_count(transaction_id)   = 0: { name: "transaction_id never null"   }
+  - missing_count(account_id)       = 0: { name: "account_id never null"       }
+  - missing_count(counterparty_id)  = 0: { name: "counterparty_id never null"  }
+  - missing_count(transaction_type) = 0: { name: "transaction_type never null" }
+  - missing_count(amount)           = 0: { name: "amount never null"           }
+  - missing_count(currency)         = 0: { name: "currency never null"         }
+  - missing_count(status)           = 0: { name: "status never null"           }
+  - missing_count(initiated_at)     = 0: { name: "initiated_at never null"     }
+  - missing_count(is_flagged)       = 0: { name: "is_flagged never null"       }
+  - missing_count(source_system)    = 0: { name: "source_system never null"    }
+
+  # ── Uniqueness ────────────────────────────────────────────────────────────────
+  - duplicate_count(transaction_id) = 0:
+      name: "transaction_id is unique — no double-publish"
+      fail: when > 0
+
+  # ── Validity: transaction_type domain ────────────────────────────────────────
+  - invalid_count(transaction_type) = 0:
+      name: "transaction_type within allowed domain"
+      valid values: [PAYMENT, TRANSFER, REFUND]
+      fail: when > 0
+
+  # ── Validity: status domain ───────────────────────────────────────────────────
+  - invalid_count(status) = 0:
+      name: "status within allowed domain"
+      valid values: [COMPLETED, PENDING, FAILED, REVERSED]
+      fail: when > 0
+
+  # ── Validity: channel domain ──────────────────────────────────────────────────
+  - invalid_count(channel) = 0:
+      name: "channel within allowed domain"
+      valid values: [MOBILE, WEB, ATM, BRANCH, API]
+      fail: when > 0
+
+  # ── Validity: currency — ISO 4217 3-letter codes ─────────────────────────────
+  - invalid_count(currency) = 0:
+      name: "currency is valid ISO 4217 code"
+      valid format: regex
+      valid values regex: "^[A-Z]{3}$"
+      fail: when > 0
+
+  # ── Validity: amount range ────────────────────────────────────────────────────
+  # Refunds are negative. Cap at £1M — anything above is a data error not
+  # a legitimate transaction in this system.
+  - values between -100000 and 1000000 (amount):
+      name: "amount within plausible range (-100k to 1M)"
+      fail: when invalid_count > 0
+
+  # ── Validity: source_system ───────────────────────────────────────────────────
+  - invalid_count(source_system) = 0:
+      name: "source_system is CORE_BANKING_v2"
+      valid values: [CORE_BANKING_v2]
+      fail: when > 0
+
+  # ── Referential logic: settled_at only null for PENDING/FAILED ────────────────
+  - failed rows:
+      name: "settled_at null only for PENDING or FAILED transactions"
+      fail condition: "settled_at IS NULL AND status NOT IN ('PENDING', 'FAILED')"
+
+  # ── Referential logic: merchant_category only for PAYMENT ─────────────────────
+  - failed rows:
+      name: "merchant_category only populated for PAYMENT type"
+      fail condition: "merchant_category IS NOT NULL AND transaction_type != 'PAYMENT'"
+
+  # ── Referential logic: flag_reason present when is_flagged = true ─────────────
+  - failed rows:
+      name: "flag_reason populated when transaction is flagged"
+      fail condition: "is_flagged = TRUE AND flag_reason IS NULL"
+
+  # ── Volume anomaly ────────────────────────────────────────────────────────────
+  - row_count > 0:
+      name: "Dataset is not empty"
+      fail: when < 1
+
+  - anomaly_score(row_count) < 3:
+      name: "Row volume within expected bounds"
+      warn: when >= 2
+      fail: when >= 3

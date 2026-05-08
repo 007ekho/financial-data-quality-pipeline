@@ -1,0 +1,321 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Step 1 of 4 — S3 bucket + SQS queue for Snowpipe auto-ingest.
+  When a .parquet file lands in s3://bucket/financial_transactions/dt=YYYY-MM-DD/,
+  S3 fires an event to SQS. Snowpipe polls SQS and loads automatically.
+  No Lambda, no polling from Airflow at this stage — purely event-driven.
+
+# =============================================================================
+# Parameters — override these per environment (dev / prod)
+# =============================================================================
+
+Parameters:
+
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues: [dev, prod]
+    Description: Deployment environment
+
+  ProjectName:
+    Type: String
+    Default: financial-data-quality-pipeline
+    Description: Used as a prefix on all resource names
+
+  S3BucketName:
+    Type: String
+    Description: >
+      Globally unique S3 bucket name.
+      Convention: {ProjectName}-{Environment}-raw-ingest
+      Example: financial-data-quality-pipeline-prod-raw-ingest
+
+  SnowflakeAwsAccountId:
+    Type: String
+    Description: >
+      The AWS account ID that Snowflake uses to assume the S3 reader role.
+      Find this in Snowflake: SELECT SYSTEM$GET_AWS_SNS_IAM_POLICY();
+      Or from your Snowflake account settings under Storage Integrations.
+
+  SnowflakeExternalId:
+    Type: String
+    NoEcho: true
+    Description: >
+      The external ID Snowflake provides for the IAM trust relationship.
+      Found in your Snowflake Storage Integration details.
+      Keep this secret — treat it like a password.
+
+# =============================================================================
+# Resources
+# =============================================================================
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # 1a. SQS queue — Snowpipe listens here for new file notifications
+  # ---------------------------------------------------------------------------
+
+  SnowpipeIngestQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-${Environment}-snowpipe-ingest'
+      VisibilityTimeout: 300        # 5 min — matches Snowpipe processing window
+      MessageRetentionPeriod: 86400 # 24 hours — catch any delayed Snowpipe polls
+      ReceiveMessageWaitTimeSeconds: 20  # long polling — reduces empty receives
+
+      # Dead letter queue: after 3 failed receives, message moves to DLQ
+      # This surfaces files Snowpipe repeatedly failed to process
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt SnowpipeIngestDLQ.Arn
+        maxReceiveCount: 3
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ---------------------------------------------------------------------------
+  # 1b. Dead letter queue — catches files Snowpipe failed to process 3x
+  # ---------------------------------------------------------------------------
+
+  SnowpipeIngestDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-${Environment}-snowpipe-ingest-dlq'
+      MessageRetentionPeriod: 1209600  # 14 days — time to investigate failures
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ---------------------------------------------------------------------------
+  # 1c. SQS queue policy — allows S3 to send messages to the queue
+  # Also allows Snowflake's AWS account to receive messages (auto-ingest)
+  # ---------------------------------------------------------------------------
+
+  SnowpipeQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref SnowpipeIngestQueue
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+
+          # S3 sends notifications to SQS when objects land
+          - Sid: AllowS3ToSendMessages
+            Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt SnowpipeIngestQueue.Arn
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:aws:s3:::${S3BucketName}'
+
+          # Snowflake's AWS account reads from the queue (auto-ingest)
+          - Sid: AllowSnowflakeToReceiveMessages
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${SnowflakeAwsAccountId}:root'
+            Action:
+              - sqs:ReceiveMessage
+              - sqs:DeleteMessage
+              - sqs:GetQueueAttributes
+            Resource: !GetAtt SnowpipeIngestQueue.Arn
+
+  # ---------------------------------------------------------------------------
+  # 2a. S3 bucket — landing zone for nightly .parquet file drops
+  # ---------------------------------------------------------------------------
+
+  RawIngestBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: SnowpipeQueuePolicy  # queue policy must exist before bucket notification
+    Properties:
+      BucketName: !Ref S3BucketName
+
+      # Block all public access — this bucket is internal only
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+      # Versioning: keep previous versions for recovery
+      VersioningConfiguration:
+        Status: Enabled
+
+      # Lifecycle: archive raw files after 90 days, delete after 1 year
+      LifecycleConfiguration:
+        Rules:
+          - Id: ArchiveRawFiles
+            Status: Enabled
+            Prefix: financial_transactions/
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 180
+                StorageClass: GLACIER
+            ExpirationInDays: 365
+
+          - Id: CleanupIncompleteUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+      # Server-side encryption — AES256 at rest
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+      # S3 event notification → SQS when .parquet files land
+      NotificationConfiguration:
+        QueueConfigurations:
+          - Event: 's3:ObjectCreated:*'
+            Queue: !GetAtt SnowpipeIngestQueue.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: 'financial_transactions/'
+                  - Name: suffix
+                    Value: '.parquet'
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ---------------------------------------------------------------------------
+  # 2b. S3 bucket policy — restricts access to Snowflake IAM role + MWAA
+  # ---------------------------------------------------------------------------
+
+  RawIngestBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref RawIngestBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+
+          # Snowflake assumes this role to read .parquet files
+          - Sid: AllowSnowflakeS3Read
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt SnowflakeS3ReaderRole.Arn
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:ListBucket
+              - s3:GetBucketLocation
+            Resource:
+              - !Sub 'arn:aws:s3:::${S3BucketName}'
+              - !Sub 'arn:aws:s3:::${S3BucketName}/*'
+
+          # Deny unencrypted uploads
+          - Sid: DenyUnencryptedUploads
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub 'arn:aws:s3:::${S3BucketName}/*'
+            Condition:
+              StringNotEquals:
+                's3:x-amz-server-side-encryption': AES256
+
+  # ---------------------------------------------------------------------------
+  # 3. IAM role — Snowflake assumes this to read S3
+  # ---------------------------------------------------------------------------
+
+  SnowflakeS3ReaderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-${Environment}-snowflake-s3-reader'
+      Description: Role Snowflake assumes to read raw ingest files from S3
+
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${SnowflakeAwsAccountId}:root'
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref SnowflakeExternalId
+
+      Policies:
+        - PolicyName: SnowflakeS3ReadPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}/financial_transactions/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: !Sub 'arn:aws:s3:::${S3BucketName}'
+                Condition:
+                  StringLike:
+                    s3:prefix: 'financial_transactions/*'
+
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+# =============================================================================
+# Outputs — consumed by Steps 2, 3, 4 via cross-stack references
+# =============================================================================
+
+Outputs:
+
+  S3BucketName:
+    Description: Raw ingest S3 bucket name
+    Value: !Ref RawIngestBucket
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-s3-bucket-name'
+
+  S3BucketArn:
+    Description: Raw ingest S3 bucket ARN
+    Value: !GetAtt RawIngestBucket.Arn
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-s3-bucket-arn'
+
+  SQSQueueArn:
+    Description: Snowpipe ingest SQS queue ARN
+    Value: !GetAtt SnowpipeIngestQueue.Arn
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-sqs-queue-arn'
+
+  SQSQueueUrl:
+    Description: Snowpipe ingest SQS queue URL
+    Value: !Ref SnowpipeIngestQueue
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-sqs-queue-url'
+
+  DLQArn:
+    Description: Dead letter queue ARN for failed Snowpipe messages
+    Value: !GetAtt SnowpipeIngestDLQ.Arn
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-dlq-arn'
+
+  SnowflakeS3ReaderRoleArn:
+    Description: >
+      ARN of the IAM role Snowflake assumes to read S3.
+      Paste this into your Snowflake Storage Integration:
+      CREATE STORAGE INTEGRATION ... STORAGE_AWS_ROLE_ARN = '<this value>'
+    Value: !GetAtt SnowflakeS3ReaderRole.Arn
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-snowflake-s3-role-arn'

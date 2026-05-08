@@ -1,0 +1,30 @@
+# requirements.txt
+# Installed on MWAA workers at environment startup.
+# Upload to: s3://<mwaa-dags-bucket>/requirements/requirements.txt
+#
+# After updating this file, redeploy by uploading to S3 and triggering
+# an MWAA environment update — workers restart with the new packages.
+#
+# Pin major versions only — MWAA manages the underlying Python environment.
+
+# ── Soda Core 4.0 + Snowflake connector ───────────────────────────────────────
+soda-core>=4.0,<5.0
+soda-snowflake>=4.0,<5.0
+
+# ── Snowflake connector (used by SnowflakeHook in the DAG) ────────────────────
+snowflake-connector-python>=3.6,<4.0
+snowflake-sqlalchemy>=1.5,<2.0
+
+# ── HTTP requests (Slack alerts, dbt Cloud API) ───────────────────────────────
+requests>=2.31,<3.0
+
+# ── Data handling ─────────────────────────────────────────────────────────────
+pandas>=2.0,<3.0
+pyarrow>=14.0,<16.0
+
+# ── AWS SDK (Secrets Manager calls from within DAG tasks) ─────────────────────
+boto3>=1.34,<2.0
+
+# ── Airflow providers (pre-installed on MWAA but pinned for safety) ───────────
+apache-airflow-providers-snowflake>=5.1,<6.0
+apache-airflow-providers-amazon>=8.0,<9.0

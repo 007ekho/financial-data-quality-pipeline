@@ -1,0 +1,29 @@
+# soda/configuration.yml
+# Soda Core 4.0 — data source connection config
+# Secrets are injected via environment variables (never hardcoded)
+# Set these in Airflow Connections or AWS Secrets Manager
+
+data_sources:
+  snowflake_raw:
+    type: snowflake
+    account:    ${SNOWFLAKE_ACCOUNT}
+    user:       ${SNOWFLAKE_USER}
+    password:   ${SNOWFLAKE_PASSWORD}       # or use private_key_path for key-pair auth
+    database:   ${SNOWFLAKE_DATABASE}
+    warehouse:  ${SNOWFLAKE_WAREHOUSE}
+    schema:     RAW
+    role:       SODA_CHECK_ROLE             # least-privilege read-only role
+    session_parameters:
+      QUERY_TAG: "soda-quality-check"
+
+  snowflake_serving:
+    type: snowflake
+    account:    ${SNOWFLAKE_ACCOUNT}
+    user:       ${SNOWFLAKE_USER}
+    password:   ${SNOWFLAKE_PASSWORD}
+    database:   ${SNOWFLAKE_DATABASE}
+    warehouse:  ${SNOWFLAKE_WAREHOUSE}
+    schema:     SERVING
+    role:       SODA_CHECK_ROLE
+    session_parameters:
+      QUERY_TAG: "soda-quality-check"

@@ -1,0 +1,224 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Step 3 of 4 — MWAA (Managed Workflows for Apache Airflow) environment.
+  Provisions the Airflow environment, S3 DAG bucket, VPC networking,
+  and security group. Reads secrets from Step 2 and S3 outputs from Step 1.
+  DAGs are deployed by pushing to the DAGs S3 bucket — MWAA picks them up
+  automatically within a few minutes.
+
+# =============================================================================
+# Parameters
+# =============================================================================
+
+Parameters:
+
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues: [dev, prod]
+
+  ProjectName:
+    Type: String
+    Default: financial-data-quality-pipeline
+
+  AirflowVersion:
+    Type: String
+    Default: "2.9.2"
+    Description: Airflow version — check AWS docs for latest supported version
+
+  EnvironmentClass:
+    Type: String
+    Default: mw1.small
+    AllowedValues: [mw1.small, mw1.medium, mw1.large]
+    Description: >
+      mw1.small  — 1 vCPU, 2GB RAM  — sufficient for nightly single-DAG run
+      mw1.medium — 2 vCPU, 4GB RAM  — use if adding more DAGs
+      mw1.large  — 4 vCPU, 8GB RAM  — use for concurrent heavy workloads
+
+  MaxWorkers:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: >
+      Max Airflow worker count. 1 is sufficient for a single nightly DAG.
+      Increase if running multiple concurrent DAGs.
+
+  # VpcId, PrivateSubnet1, PrivateSubnet2 are imported from Step 0 outputs.
+  # No need to pass them manually.
+
+# =============================================================================
+# Resources
+# =============================================================================
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # 1. S3 bucket for DAGs, plugins, and requirements
+  # MWAA watches this bucket — pushing a file here deploys it automatically.
+  # ---------------------------------------------------------------------------
+
+  MWAADagsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-${Environment}-mwaa-dags'
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ---------------------------------------------------------------------------
+  # 2. Security group for MWAA
+  # MWAA workers need outbound HTTPS to reach Snowflake, dbt Cloud, Slack.
+  # No inbound rules needed — MWAA manages its own internal traffic.
+  # ---------------------------------------------------------------------------
+
+  MWAASecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${ProjectName}-${Environment}-mwaa-sg'
+      GroupDescription: Security group for MWAA environment
+      VpcId:
+        Fn::ImportValue: !Sub '${ProjectName}-${Environment}-vpc-id' 
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS outbound to Snowflake, dbt Cloud, Slack, AWS APIs
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0
+          Description: PostgreSQL outbound for Airflow metadata DB (RDS)
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  MWAASecurityGroupSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref MWAASecurityGroup
+      IpProtocol: -1
+      SourceSecurityGroupId: !Ref MWAASecurityGroup
+      Description: Allow MWAA components to communicate with each other
+
+  # ---------------------------------------------------------------------------
+  # 3. MWAA environment
+  # ---------------------------------------------------------------------------
+
+  MWAAEnvironment:
+    Type: AWS::MWAA::Environment
+    DependsOn: MWAADagsBucket
+    Properties:
+      Name: !Sub '${ProjectName}-${Environment}'
+      AirflowVersion: !Ref AirflowVersion
+      EnvironmentClass: !Ref EnvironmentClass
+
+      # DAG bucket — MWAA watches dags/ prefix for DAG files
+      SourceBucketArn: !GetAtt MWAADagsBucket.Arn
+      DagS3Path: dags
+      PluginsS3Path: plugins/plugins.zip
+      RequirementsS3Path: requirements/requirements.txt
+
+      # Networking — two private subnets, one security group
+      NetworkConfiguration:
+        SubnetIds:
+          - Fn::ImportValue: !Sub '${ProjectName}-${Environment}-private-subnet-1'
+          - Fn::ImportValue: !Sub '${ProjectName}-${Environment}-private-subnet-2'
+        SecurityGroupIds:
+          - !Ref MWAASecurityGroup
+
+      # Execution role — defined in Step 4
+      ExecutionRoleArn: !Sub
+        - 'arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-mwaa-execution-role'
+        - {}
+
+      # Logging — send all Airflow logs to CloudWatch
+      LoggingConfiguration:
+        DagProcessingLogs:
+          Enabled: true
+          LogLevel: WARNING
+        SchedulerLogs:
+          Enabled: true
+          LogLevel: WARNING
+        TaskLogs:
+          Enabled: true
+          LogLevel: INFO
+        WebserverLogs:
+          Enabled: true
+          LogLevel: WARNING
+        WorkerLogs:
+          Enabled: true
+          LogLevel: INFO
+
+      # Airflow configuration overrides
+      AirflowConfigurationOptions:
+        core.dags_are_paused_at_creation: "true"
+        core.max_active_runs_per_dag: "1"
+        core.parallelism: "4"
+        scheduler.dag_dir_list_interval: "30"
+        webserver.dag_default_view: "graph"
+
+      # Max workers — 1 is enough for a single nightly DAG
+      MaxWorkers: !Ref MaxWorkers
+      MinWorkers: 1
+      Schedulers: 2
+
+      # Web server access — PRIVATE means only accessible within the VPC
+      # Change to PUBLIC if you need to access the Airflow UI from outside
+      WebserverAccessMode: PRIVATE_ONLY
+
+      Tags:
+        Project: !Ref ProjectName
+        Environment: !Ref Environment
+        ManagedBy: CloudFormation
+
+# =============================================================================
+# Outputs
+# =============================================================================
+
+Outputs:
+
+  MWAAEnvironmentName:
+    Description: MWAA environment name
+    Value: !Ref MWAAEnvironment
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-mwaa-name'
+
+  MWAAWebserverUrl:
+    Description: Airflow UI URL (only accessible within VPC)
+    Value: !GetAtt MWAAEnvironment.WebserverUrl
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-mwaa-url'
+
+  MWAADagsBucketName:
+    Description: >
+      S3 bucket for DAGs. Deploy your DAG by running:
+      aws s3 cp dags/financial_transactions_pipeline.py
+        s3://<this-value>/dags/
+    Value: !Ref MWAADagsBucket
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-mwaa-dags-bucket'
+
+  MWAASecurityGroupId:
+    Description: MWAA security group ID
+    Value: !Ref MWAASecurityGroup
+    Export:
+      Name: !Sub '${ProjectName}-${Environment}-mwaa-sg-id'

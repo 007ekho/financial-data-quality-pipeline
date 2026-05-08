@@ -1,0 +1,29 @@
+# soda/configuration_ci.yml
+# Used by GitHub Actions CI gate only — never by the production MWAA DAG.
+# Points at RAW_CI and SERVING_CI schemas so CI never touches prod data.
+# Secrets injected as environment variables from GitHub Actions secrets.
+
+data_sources:
+  snowflake_raw:
+    type: snowflake
+    account:    ${SNOWFLAKE_ACCOUNT}
+    user:       ${SNOWFLAKE_USER}
+    password:   ${SNOWFLAKE_PASSWORD}
+    database:   ${SNOWFLAKE_DATABASE}
+    warehouse:  ${SNOWFLAKE_WAREHOUSE}
+    schema:     RAW_CI
+    role:       SODA_CI_ROLE
+    session_parameters:
+      QUERY_TAG: "soda-ci-check"
+
+  snowflake_serving:
+    type: snowflake
+    account:    ${SNOWFLAKE_ACCOUNT}
+    user:       ${SNOWFLAKE_USER}
+    password:   ${SNOWFLAKE_PASSWORD}
+    database:   ${SNOWFLAKE_DATABASE}
+    warehouse:  ${SNOWFLAKE_WAREHOUSE}
+    schema:     SERVING_CI
+    role:       SODA_CI_ROLE
+    session_parameters:
+      QUERY_TAG: "soda-ci-check"
