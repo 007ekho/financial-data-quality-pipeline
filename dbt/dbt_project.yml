@@ -18,12 +18,12 @@ models:
   financial_data_quality:
 
     silver:
-      +schema:       SILVER
+      
       +materialized: view
       +tags:         ["silver", "nightly"]
 
     gold:
-      +schema:       GOLD
+      
       +materialized: table
       +tags:         ["gold", "nightly"]
       +post-hook:
