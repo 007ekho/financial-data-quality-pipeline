@@ -1,0 +1,14 @@
+# soda/data_source_bronze.yml
+# Soda v4 data source configuration for BRONZE_CI schema (CI gate)
+# Used by ci/run_soda_scan.py via verify_contract_locally
+ 
+type: snowflake
+name: snowflake_bronze
+connection:
+  account:    ${SNOWFLAKE_ACCOUNT}
+  user:       ${SNOWFLAKE_USER}
+  password:   ${SNOWFLAKE_PASSWORD}
+  database:   ${SNOWFLAKE_DATABASE}
+  warehouse:  ${SNOWFLAKE_WAREHOUSE}
+  schema:     BRONZE_CI
+  role:       PIPELINE_ROLE

@@ -1,3 +1,6 @@
+Data quality ci · YML
+Copy
+
 # .github/workflows/data_quality_ci.yml
 # CI gate — runs on every PR touching contracts or dbt models
 # Blocks merge if SodaCL contracts fail against staging data
@@ -8,9 +11,9 @@
 #   - Schema drift introduced by a new dbt column or type change
 #
 # It does NOT run on the nightly data schedule — only on code changes.
-
+ 
 name: Data quality CI gate
-
+ 
 on:
   pull_request:
     paths:
@@ -18,44 +21,43 @@ on:
       - "dbt/models/**"
       - "dbt/dbt_project.yml"
       - "soda/**"
-
+ 
 env:
   SNOWFLAKE_ACCOUNT:   ${{ secrets.SNOWFLAKE_ACCOUNT }}
   SNOWFLAKE_USER:      ${{ secrets.SNOWFLAKE_CI_USER }}
   SNOWFLAKE_PASSWORD:  ${{ secrets.SNOWFLAKE_CI_PASSWORD }}
   SNOWFLAKE_DATABASE:  ${{ secrets.SNOWFLAKE_DATABASE }}
   SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_CI_WAREHOUSE }}
-
+ 
 jobs:
   data-quality-ci:
     name: Soda contracts + dbt slim CI (staging)
     runs-on: ubuntu-latest
-
+ 
     steps:
-
+ 
       - uses: actions/checkout@v4
-
+ 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-
+ 
       - name: Install Soda Core and dbt
         run: |
           pip install \
             "soda-core>=4.0" \
             "soda-snowflake>=4.0" \
             "dbt-snowflake>=1.7"
-
-      - name: Soda RAW contract scan (staging)
+ 
+      - name: Soda BRONZE contract scan (staging)
         run: |
-          soda scan \
-            -d snowflake_bronze \
-            -c soda/configuration_ci.yml \
+          python3 ci/run_soda_scan.py \
+            soda/data_source_bronze.yml \
             contracts/bronze/financial_transactions_bronze.yml
         env:
           SNOWFLAKE_SCHEMA: BRONZE_CI
-
+ 
       - name: Download production manifest for slim CI
         run: |
           mkdir -p ./target
@@ -64,7 +66,7 @@ jobs:
           AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_CI_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_CI_SECRET_KEY }}
           AWS_REGION:            eu-west-2
-
+ 
       - name: dbt run — changed models only
         working-directory: dbt
         run: |
@@ -76,7 +78,7 @@ jobs:
         env:
           DBT_TARGET: ci
           SNOWFLAKE_SCHEMA: GOLD_CI
-
+ 
       - name: dbt test — changed models only
         working-directory: dbt
         run: |
@@ -88,16 +90,15 @@ jobs:
         env:
           DBT_TARGET: ci
           SNOWFLAKE_SCHEMA: GOLD_CI
-
-      - name: Soda SERVING contract scan (staging)
+ 
+      - name: Soda GOLD contract scan (staging)
         run: |
-          soda scan \
-            -d snowflake_gold \
-            -c soda/configuration_ci.yml \
+          python3 ci/run_soda_scan.py \
+            soda/data_source_gold.yml \
             contracts/gold/fct_financial_transactions.yml
         env:
           SNOWFLAKE_SCHEMA: GOLD_CI
-
+ 
       - name: Post Soda results to PR
         if: always()
         uses: actions/github-script@v7
