@@ -47,12 +47,19 @@ jobs:
             "soda-snowflake>=4.0" \
             "dbt-snowflake>=1.7"
 
-      - name: Soda RAW contract scan (staging)
+      - name: Soda BRONZE contract scan (staging)
         run: |
-          soda scan \
-            -d snowflake_bronze \
-            -c soda/configuration_ci.yml \
-            contracts/bronze/financial_transactions_bronze.yml
+          python3 - << 'EOF'
+          import os, sys
+          from soda.scan import Scan
+          scan = Scan()
+          scan.set_data_source_name("snowflake_bronze")
+          scan.add_configuration_yaml_file("soda/configuration_ci.yml")
+          scan.add_sodacl_yaml_file("contracts/bronze/financial_transactions_bronze.yml")
+          scan.set_scan_definition_name("ci-bronze")
+          exit_code = scan.execute()
+          sys.exit(exit_code)
+          EOF
         env:
           SNOWFLAKE_SCHEMA: BRONZE_CI
 
@@ -89,12 +96,19 @@ jobs:
           DBT_TARGET: ci
           SNOWFLAKE_SCHEMA: GOLD_CI
 
-      - name: Soda SERVING contract scan (staging)
+      - name: Soda GOLD contract scan (staging)
         run: |
-          soda scan \
-            -d snowflake_gold \
-            -c soda/configuration_ci.yml \
-            contracts/gold/fct_financial_transactions.yml
+          python3 - << 'EOF'
+          import os, sys
+          from soda.scan import Scan
+          scan = Scan()
+          scan.set_data_source_name("snowflake_gold")
+          scan.add_configuration_yaml_file("soda/configuration_ci.yml")
+          scan.add_sodacl_yaml_file("contracts/gold/fct_financial_transactions.yml")
+          scan.set_scan_definition_name("ci-gold")
+          exit_code = scan.execute()
+          sys.exit(exit_code)
+          EOF
         env:
           SNOWFLAKE_SCHEMA: GOLD_CI
 
