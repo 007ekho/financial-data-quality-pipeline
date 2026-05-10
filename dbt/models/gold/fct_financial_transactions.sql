@@ -64,14 +64,14 @@ enriched AS (
 
         -- amount_bucket — checked by SERVING Soda contract
         CASE
-            WHEN s.transaction_type = 'REFUND'    THEN 'REFUND'
-            WHEN s.amount_gbp BETWEEN 0    AND 10   THEN 'MICRO'
-            WHEN s.amount_gbp BETWEEN 10   AND 100  THEN 'SMALL'
-            WHEN s.amount_gbp BETWEEN 100  AND 1000 THEN 'MEDIUM'
-            WHEN s.amount_gbp BETWEEN 1000 AND 10000 THEN 'LARGE'
-            WHEN s.amount_gbp > 10000               THEN 'WHALE'
-            ELSE 'MICRO'
-        END                                              AS amount_bucket,
+    WHEN s.transaction_type = 'REFUND'                           THEN 'REFUND'
+    WHEN ROUND(s.amount * COALESCE(fx.rate_to_gbp, 1.0), 2) BETWEEN 0    AND 10    THEN 'MICRO'
+    WHEN ROUND(s.amount * COALESCE(fx.rate_to_gbp, 1.0), 2) BETWEEN 10   AND 100   THEN 'SMALL'
+    WHEN ROUND(s.amount * COALESCE(fx.rate_to_gbp, 1.0), 2) BETWEEN 100  AND 1000  THEN 'MEDIUM'
+    WHEN ROUND(s.amount * COALESCE(fx.rate_to_gbp, 1.0), 2) BETWEEN 1000 AND 10000 THEN 'LARGE'
+    WHEN ROUND(s.amount * COALESCE(fx.rate_to_gbp, 1.0), 2) > 10000                THEN 'WHALE'
+    ELSE 'MICRO'
+END                                           AS amount_bucket,
 
         -- ── Timestamps ────────────────────────────────────────────────────
         s.initiated_at,
