@@ -1,8 +1,6 @@
 # requirements.txt
-# MWAA workers — keep minimal to avoid dependency conflicts.
-# Airflow providers are pre-installed on MWAA — do not re-add them.
-# Only add packages not already available in the MWAA environment.
-
-soda-core==4.7.0
-soda-snowflake==4.7.0
-requests==2.31.0
+# Astronomer/MWAA workers — pinned for stability.
+# Using Soda Core 3.x — 4.x has unstable Python API.
+ 
+soda-core-snowflake>=3.3,<4.0
+requests>=2.31,<3.0

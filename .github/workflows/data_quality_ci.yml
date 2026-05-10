@@ -42,9 +42,10 @@ jobs:
 
       - name: Install Soda Core and dbt
         run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install "soda-core==4.7.0" "soda-snowflake==4.7.0" "dbt-snowflake>=1.7"
-          python3 -c "from soda.scan import Scan; print('Soda installed successfully')"
+          pip install \
+            "soda-core>=4.0" \
+            "soda-snowflake>=4.0" \
+            "dbt-snowflake>=1.7"
 
       - name: Soda BRONZE contract scan (staging)
         run: |
