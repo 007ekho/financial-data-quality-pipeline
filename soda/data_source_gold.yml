@@ -1,0 +1,10 @@
+type: snowflake
+name: snowflake_gold
+connection:
+  account:    ${SNOWFLAKE_ACCOUNT}
+  user:       ${SNOWFLAKE_USER}
+  password:   ${SNOWFLAKE_PASSWORD}
+  database:   ${SNOWFLAKE_DATABASE}
+  warehouse:  ${SNOWFLAKE_WAREHOUSE}
+  schema:     GOLD_CI
+  role:       PIPELINE_ROLE

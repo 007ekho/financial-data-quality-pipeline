@@ -1,22 +1,23 @@
 """
 ci/run_soda_scan.py
-Runs a Soda Core 3.x contract scan.
-Usage: python3 ci/run_soda_scan.py <data_source> <config_path> <contract_path> <scan_name>
+Runs a Soda Core 4.x contract verification.
+Usage: python3 ci/run_soda_scan.py <data_source_yaml> <contract_path>
 """
 import sys
-from soda.scan import Scan
+from soda_core.contracts import verify_contract_locally
  
-data_source   = sys.argv[1]
-config_path   = sys.argv[2]
-contract_path = sys.argv[3]
-scan_name     = sys.argv[4]
+data_source_yaml = sys.argv[1]
+contract_path    = sys.argv[2]
  
-scan = Scan()
-scan.set_data_source_name(data_source)
-scan.add_configuration_yaml_file(config_path)
-scan.add_sodacl_yaml_file(contract_path)
-scan.set_scan_definition_name(scan_name)
+result = verify_contract_locally(
+    data_source_file_path=data_source_yaml,
+    contract_file_path=contract_path,
+    publish=False,
+)
  
-exit_code = scan.execute()
-print(scan.get_logs_text())
-sys.exit(exit_code)
+print(result.get_logs() if hasattr(result, 'get_logs') else str(result))
+ 
+if not result.is_ok():
+    sys.exit(1)
+ 
+sys.exit(0)
