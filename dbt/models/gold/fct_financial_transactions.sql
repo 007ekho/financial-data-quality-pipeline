@@ -12,7 +12,6 @@
 {{
     config(
         materialized='table',
-        schema='GOLD',
         tags=['serving', 'nightly'],
         post_hook="ALTER TABLE {{ this }} CLUSTER BY (transaction_date)"
     )

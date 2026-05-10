@@ -10,7 +10,6 @@
 {{
     config(
         materialized='view',
-        schema='SILVER',
         tags=['raw', 'nightly']
     )
 }}
