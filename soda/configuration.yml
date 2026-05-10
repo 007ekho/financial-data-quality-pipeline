@@ -4,26 +4,26 @@
 # Set these in Airflow Connections or AWS Secrets Manager
 
 data_sources:
-  snowflake_raw:
+  snowflake_bronze:
     type: snowflake
     account:    ${SNOWFLAKE_ACCOUNT}
     user:       ${SNOWFLAKE_USER}
     password:   ${SNOWFLAKE_PASSWORD}       # or use private_key_path for key-pair auth
     database:   ${SNOWFLAKE_DATABASE}
     warehouse:  ${SNOWFLAKE_WAREHOUSE}
-    schema:     RAW
+    schema:     BRONZE
     role:       SODA_CHECK_ROLE             # least-privilege read-only role
     session_parameters:
       QUERY_TAG: "soda-quality-check"
 
-  snowflake_serving:
+  snowflake_gold:
     type: snowflake
     account:    ${SNOWFLAKE_ACCOUNT}
     user:       ${SNOWFLAKE_USER}
     password:   ${SNOWFLAKE_PASSWORD}
     database:   ${SNOWFLAKE_DATABASE}
     warehouse:  ${SNOWFLAKE_WAREHOUSE}
-    schema:     SERVING
+    schema:     GOLD
     role:       SODA_CHECK_ROLE
     session_parameters:
       QUERY_TAG: "soda-quality-check"

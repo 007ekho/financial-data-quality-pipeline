@@ -50,11 +50,11 @@ jobs:
       - name: Soda RAW contract scan (staging)
         run: |
           soda scan \
-            -d snowflake_raw \
+            -d snowflake_bronze \
             -c soda/configuration_ci.yml \
-            contracts/raw/financial_transactions_raw.yml
+            contracts/bronze/financial_transactions_bronze.yml
         env:
-          SNOWFLAKE_SCHEMA: RAW_CI
+          SNOWFLAKE_SCHEMA: BRONZE_CI
 
       - name: Download production manifest for slim CI
         run: |
@@ -75,7 +75,7 @@ jobs:
             --target ci
         env:
           DBT_TARGET: ci
-          SNOWFLAKE_SCHEMA: SERVING_CI
+          SNOWFLAKE_SCHEMA: GOLD_CI
 
       - name: dbt test — changed models only
         working-directory: dbt
@@ -87,16 +87,16 @@ jobs:
             --target ci
         env:
           DBT_TARGET: ci
-          SNOWFLAKE_SCHEMA: SERVING_CI
+          SNOWFLAKE_SCHEMA: GOLD_CI
 
       - name: Soda SERVING contract scan (staging)
         run: |
           soda scan \
-            -d snowflake_serving \
+            -d snowflake_gold \
             -c soda/configuration_ci.yml \
-            contracts/serving/fct_financial_transactions.yml
+            contracts/gold/fct_financial_transactions.yml
         env:
-          SNOWFLAKE_SCHEMA: SERVING_CI
+          SNOWFLAKE_SCHEMA: GOLD_CI
 
       - name: Post Soda results to PR
         if: always()

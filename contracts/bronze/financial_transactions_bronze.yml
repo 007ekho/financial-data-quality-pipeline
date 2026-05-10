@@ -1,7 +1,7 @@
-# contracts/raw/financial_transactions_raw.yml
+# contracts/bronze/financial_transactions_bronze.yml
 # Soda Core 4.0 Data Contract
 # Dataset: financial_transactions (Snowflake RAW schema)
-# Checkpoint: post-Snowpipe, pre-transform
+# Checkpoint: bronze layer — post-Snowpipe, pre-transform
 # Owner: Data Platform Team
 # Schedule: nightly, checked after 02:00 load
 

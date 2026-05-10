@@ -1,4 +1,4 @@
-# contracts/serving/fct_financial_transactions.yml
+# contracts/gold/fct_financial_transactions.yml
 # Soda Core 4.0 Data Contract
 # Dataset: fct_financial_transactions (Snowflake SERVING schema)
 # Checkpoint: post-dbt transform

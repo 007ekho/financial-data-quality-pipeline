@@ -56,16 +56,16 @@ SECRET_SLACK     = f"/{PROJECT}/{ENV}/slack/webhook-url"
 SECRET_DBT       = f"/{PROJECT}/{ENV}/dbt-cloud/credentials"
 
 DATABASE        = "FINANCIAL_DATA"
-RAW_TABLE       = f"{DATABASE}.RAW.FINANCIAL_TRANSACTIONS"
-SERVING_TABLE   = f"{DATABASE}.SERVING.FCT_FINANCIAL_TRANSACTIONS"
+BRONZE_TABLE    = f"{DATABASE}.BRONZE.FINANCIAL_TRANSACTIONS"
+GOLD_TABLE      = f"{DATABASE}.GOLD.FCT_FINANCIAL_TRANSACTIONS"
 QUARANTINE_DB   = f"{DATABASE}.QUARANTINE"
 AUDIT_TABLE     = f"{DATABASE}.AUDIT.DATA_QUALITY_LOG"
-PIPE_NAME       = f"{DATABASE}.RAW.FINANCIAL_TRANSACTIONS_PIPE"
+PIPE_NAME       = f"{DATABASE}.BRONZE.FINANCIAL_TRANSACTIONS_PIPE"
 
-SODA_RAW_CONTRACT     = "contracts/raw/financial_transactions_raw.yml"
-SODA_SERVING_CONTRACT = "contracts/serving/fct_financial_transactions.yml"
-SODA_DATA_SOURCE_RAW     = "snowflake_raw"
-SODA_DATA_SOURCE_SERVING = "snowflake_serving"
+SODA_BRONZE_CONTRACT  = "contracts/bronze/financial_transactions_bronze.yml"
+SODA_GOLD_CONTRACT    = "contracts/gold/fct_financial_transactions.yml"
+SODA_DATA_SOURCE_BRONZE  = "snowflake_bronze"
+SODA_DATA_SOURCE_GOLD    = "snowflake_gold"
 SODA_CONFIG_PATH = "soda/configuration.yml"
 
 DBT_SELECT = "fct_financial_transactions+"
@@ -253,7 +253,7 @@ with DAG(
     # ── 2. Soda check: RAW layer ───────────────────────────────────────────────
     @task(task_id="soda_check_raw")
     def soda_check_raw(_) -> dict:
-        return _run_soda_scan(SODA_RAW_CONTRACT, SODA_DATA_SOURCE_RAW, "raw")
+        return _run_soda_scan(SODA_BRONZE_CONTRACT, SODA_DATA_SOURCE_BRONZE, "raw")
 
     raw_scan = soda_check_raw(snowpipe_ready)
 
@@ -272,8 +272,8 @@ with DAG(
     @task(task_id="quarantine_raw_failures")
     def quarantine_raw_failures(scan_result: dict) -> dict:
         hook = SnowflakeHook(snowflake_conn_id=SNOWFLAKE_CONN)
-        stats = _quarantine_rows(hook, scan_result, RAW_TABLE)
-        _write_audit_log(hook, scan_result, stats, RAW_TABLE)
+        stats = _quarantine_rows(hook, scan_result, BRONZE_TABLE)
+        _write_audit_log(hook, scan_result, stats, BRONZE_TABLE)
         return {"quarantine_stats": stats, "scan_result": scan_result}
 
     raw_quarantine = quarantine_raw_failures(raw_scan)
@@ -285,7 +285,7 @@ with DAG(
         total = sum(s["rows_quarantined"] for s in stats)
         checks = "\n".join([f"• `{c['name']}`" for c in sr["failed_checks"]])
         return json.dumps({
-            "text": f":red_circle: *RAW contract FAILED* — `{RAW_TABLE}`\n"
+            "text": f":red_circle: *RAW contract FAILED* — `{BRONZE_TABLE}`\n"
                     f"*Failed checks:* {sr['failed']}/{sr['total_checks']}\n"
                     f"{checks}\n"
                     f"*Rows quarantined:* {total:,}\n"
@@ -346,7 +346,7 @@ with DAG(
     # ── 5. Soda check: SERVING layer ──────────────────────────────────────────
     @task(task_id="soda_check_serving")
     def soda_check_serving(_) -> dict:
-        return _run_soda_scan(SODA_SERVING_CONTRACT, SODA_DATA_SOURCE_SERVING, "serving")
+        return _run_soda_scan(SODA_GOLD_CONTRACT, SODA_DATA_SOURCE_GOLD, "serving")
 
     serving_scan = soda_check_serving(dbt_done)
 
@@ -363,8 +363,8 @@ with DAG(
     @task(task_id="quarantine_serving_failures")
     def quarantine_serving_failures(scan_result: dict) -> dict:
         hook = SnowflakeHook(snowflake_conn_id=SNOWFLAKE_CONN)
-        stats = _quarantine_rows(hook, scan_result, SERVING_TABLE)
-        _write_audit_log(hook, scan_result, stats, SERVING_TABLE)
+        stats = _quarantine_rows(hook, scan_result, GOLD_TABLE)
+        _write_audit_log(hook, scan_result, stats, GOLD_TABLE)
         return {"quarantine_stats": stats, "scan_result": scan_result}
 
     serving_quarantine = quarantine_serving_failures(serving_scan)
@@ -376,7 +376,7 @@ with DAG(
         total = sum(s["rows_quarantined"] for s in stats)
         checks = "\n".join([f"• `{c['name']}`" for c in sr["failed_checks"]])
         return json.dumps({
-            "text": f":large_yellow_circle: *SERVING contract FAILED* — `{SERVING_TABLE}`\n"
+            "text": f":large_yellow_circle: *SERVING contract FAILED* — `{GOLD_TABLE}`\n"
                     f"Raw data was clean — issue is in dbt transform logic.\n"
                     f"*Failed checks:* {sr['failed']}/{sr['total_checks']}\n"
                     f"{checks}\n"
@@ -397,7 +397,7 @@ with DAG(
     @task(task_id="pipeline_complete")
     def pipeline_complete(scan_result: dict) -> None:
         hook = SnowflakeHook(snowflake_conn_id=SNOWFLAKE_CONN)
-        _write_audit_log(hook, scan_result, [], SERVING_TABLE)
+        _write_audit_log(hook, scan_result, [], GOLD_TABLE)
         log.info("Pipeline complete. All quality gates passed. ✓")
 
     complete = pipeline_complete(serving_scan)

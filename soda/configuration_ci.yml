@@ -4,26 +4,26 @@
 # Secrets injected as environment variables from GitHub Actions secrets.
 
 data_sources:
-  snowflake_raw:
+  snowflake_bronze:
     type: snowflake
     account:    ${SNOWFLAKE_ACCOUNT}
     user:       ${SNOWFLAKE_USER}
     password:   ${SNOWFLAKE_PASSWORD}
     database:   ${SNOWFLAKE_DATABASE}
     warehouse:  ${SNOWFLAKE_WAREHOUSE}
-    schema:     RAW_CI
+    schema:     BRONZE_CI
     role:       SODA_CI_ROLE
     session_parameters:
       QUERY_TAG: "soda-ci-check"
 
-  snowflake_serving:
+  snowflake_gold:
     type: snowflake
     account:    ${SNOWFLAKE_ACCOUNT}
     user:       ${SNOWFLAKE_USER}
     password:   ${SNOWFLAKE_PASSWORD}
     database:   ${SNOWFLAKE_DATABASE}
     warehouse:  ${SNOWFLAKE_WAREHOUSE}
-    schema:     SERVING_CI
+    schema:     GOLD_CI
     role:       SODA_CI_ROLE
     session_parameters:
       QUERY_TAG: "soda-ci-check"

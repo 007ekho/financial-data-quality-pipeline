@@ -2,7 +2,7 @@ name: financial_data_quality
 version: '1.0.0'
 config-version: 2
 
-profile: financial_data_quality
+profile: default
 
 model-paths:   ["models"]
 analysis-paths: ["analyses"]
@@ -17,15 +17,15 @@ clean-targets: ["target", "dbt_packages"]
 models:
   financial_data_quality:
 
-    raw:
-      +schema:       RAW
+    silver:
+      +schema:       SILVER
       +materialized: view
-      +tags:         ["raw", "nightly"]
+      +tags:         ["silver", "nightly"]
 
-    serving:
-      +schema:       SERVING
+    gold:
+      +schema:       GOLD
       +materialized: table
-      +tags:         ["serving", "nightly"]
+      +tags:         ["gold", "nightly"]
       +post-hook:
         - "ALTER TABLE {{ this }} CLUSTER BY (transaction_date)"
 
