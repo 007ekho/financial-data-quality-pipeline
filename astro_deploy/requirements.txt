@@ -1,0 +1,4 @@
+apache-airflow-providers-snowflake>=5.0
+soda-core==4.7.0
+soda-snowflake==4.7.0
+requests>=2.31

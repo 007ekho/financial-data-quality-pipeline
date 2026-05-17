@@ -4,7 +4,7 @@
 dataset: snowflake_gold/GOLD/FCT_FINANCIAL_TRANSACTIONS
 
 columns:
-  - name: transaction_id
+  - name: TRANSACTION_ID
     data_type: varchar
     checks:
       - missing:
@@ -14,21 +14,21 @@ columns:
           threshold:
             must_be: 0
 
-  - name: amount_gbp
+  - name: AMOUNT_GBP
     data_type: float
     checks:
       - missing:
           threshold:
             must_be: 0
 
-  - name: transaction_date
+  - name: TRANSACTION_DATE
     data_type: date
     checks:
       - missing:
           threshold:
             must_be: 0
 
-  - name: amount_bucket
+  - name: AMOUNT_BUCKET
     data_type: varchar
     checks:
       - missing:
@@ -39,17 +39,17 @@ columns:
           threshold:
             must_be: 0
 
-  - name: hour_of_day
+  - name: HOUR_OF_DAY
     data_type: integer
     checks:
       - missing:
           threshold:
             must_be: 0
 
-  - name: settlement_hours
+  - name: SETTLEMENT_HOURS
     data_type: float
 
-  - name: loaded_at
+  - name: LOADED_AT
     data_type: timestamp
     checks:
       - missing:

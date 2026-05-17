@@ -1,10 +1,11 @@
 # contracts/bronze/financial_transactions_bronze.yml
 # Soda Core 4.x data contract for BRONZE.FINANCIAL_TRANSACTIONS
+# Note: Snowflake stores column names in UPPERCASE — match here
 
 dataset: snowflake_bronze/BRONZE/FINANCIAL_TRANSACTIONS
 
 columns:
-  - name: transaction_id
+  - name: TRANSACTION_ID
     data_type: varchar
     checks:
       - missing:
@@ -14,21 +15,21 @@ columns:
           threshold:
             must_be: 0
 
-  - name: account_id
+  - name: ACCOUNT_ID
     data_type: varchar
     checks:
       - missing:
           threshold:
             must_be: 0
 
-  - name: counterparty_id
+  - name: COUNTERPARTY_ID
     data_type: varchar
     checks:
       - missing:
           threshold:
             must_be: 0
 
-  - name: transaction_type
+  - name: TRANSACTION_TYPE
     data_type: varchar
     checks:
       - missing:
@@ -39,21 +40,21 @@ columns:
           threshold:
             must_be: 0
 
-  - name: amount
+  - name: AMOUNT
     data_type: float
     checks:
       - missing:
           threshold:
             must_be: 0
 
-  - name: currency
+  - name: CURRENCY
     data_type: varchar
     checks:
       - missing:
           threshold:
             must_be: 0
 
-  - name: status
+  - name: STATUS
     data_type: varchar
     checks:
       - missing:
@@ -64,7 +65,7 @@ columns:
           threshold:
             must_be: 0
 
-  - name: channel
+  - name: CHANNEL
     data_type: varchar
     checks:
       - missing:
@@ -75,30 +76,30 @@ columns:
           threshold:
             must_be: 0
 
-  - name: merchant_category
+  - name: MERCHANT_CATEGORY
     data_type: varchar
 
-  - name: initiated_at
+  - name: INITIATED_AT
     data_type: timestamp_ntz
     checks:
       - missing:
           threshold:
             must_be: 0
 
-  - name: settled_at
+  - name: SETTLED_AT
     data_type: timestamp_ntz
 
-  - name: is_flagged
+  - name: IS_FLAGGED
     data_type: boolean
     checks:
       - missing:
           threshold:
             must_be: 0
 
-  - name: flag_reason
+  - name: FLAG_REASON
     data_type: varchar
 
-  - name: source_system
+  - name: SOURCE_SYSTEM
     data_type: varchar
     checks:
       - missing:
@@ -109,7 +110,7 @@ columns:
           threshold:
             must_be: 0
 
-  - name: ingested_at
+  - name: INGESTED_AT
     data_type: timestamp_ntz
     checks:
       - missing:
