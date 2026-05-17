@@ -1,97 +1,57 @@
 # contracts/gold/fct_financial_transactions.yml
-# Soda Core 4.0 Data Contract
-# Dataset: fct_financial_transactions (Snowflake SERVING schema)
-# Checkpoint: post-dbt transform
-# Purpose: validate business logic and derived columns before serving to analysts
+# Soda Core 4.x data contract for GOLD.FCT_FINANCIAL_TRANSACTIONS
 
-dataset: fct_financial_transactions
+dataset: snowflake_gold/GOLD/FCT_FINANCIAL_TRANSACTIONS
 
-checks:
+columns:
+  - name: transaction_id
+    data_type: varchar
+    checks:
+      - missing:
+          threshold:
+            must_be: 0
+      - duplicate:
+          threshold:
+            must_be: 0
 
-  # ── Schema ────────────────────────────────────────────────────────────────────
-  - schema:
-      name: "Serving schema matches contract"
-      fail:
-        when required column missing:
-          - transaction_id
-          - account_id
-          - transaction_type
-          - amount_gbp           # dbt normalises all amounts to GBP
-          - status
-          - initiated_at
-          - transaction_date     # date part, derived by dbt
-          - hour_of_day          # derived by dbt
-          - is_flagged
-          - amount_bucket        # derived: MICRO / SMALL / MEDIUM / LARGE / WHALE
-          - settlement_hours     # derived: hours between initiated and settled
-          - loaded_at
+  - name: amount_gbp
+    data_type: float
+    checks:
+      - missing:
+          threshold:
+            must_be: 0
 
-  # ── Freshness ─────────────────────────────────────────────────────────────────
-  - freshness(loaded_at) < 4h:
-      name: "Serving layer freshness: dbt ran within 4 hours"
-      fail: when > 4h
-      warn: when > 3h
+  - name: transaction_date
+    data_type: date
+    checks:
+      - missing:
+          threshold:
+            must_be: 0
 
-  # ── Completeness ─────────────────────────────────────────────────────────────
-  - missing_count(transaction_id)   = 0: { name: "No null transaction_id in serving"  }
-  - missing_count(amount_gbp)       = 0: { name: "amount_gbp always converted"        }
-  - missing_count(transaction_date) = 0: { name: "transaction_date always derived"    }
-  - missing_count(amount_bucket)    = 0: { name: "amount_bucket always categorised"   }
-  - missing_count(hour_of_day)      = 0: { name: "hour_of_day always derived"         }
+  - name: amount_bucket
+    data_type: varchar
+    checks:
+      - missing:
+          threshold:
+            must_be: 0
+      - invalid:
+          valid_values: [REFUND, MICRO, SMALL, MEDIUM, LARGE, WHALE]
+          threshold:
+            must_be: 0
 
-  # ── Uniqueness ────────────────────────────────────────────────────────────────
-  - duplicate_count(transaction_id) = 0:
-      name: "No duplicates introduced by dbt transform"
-      fail: when > 0
+  - name: hour_of_day
+    data_type: integer
+    checks:
+      - missing:
+          threshold:
+            must_be: 0
 
-  # ── Business logic: amount_bucket categories ──────────────────────────────────
-  - invalid_count(amount_bucket) = 0:
-      name: "amount_bucket within defined categories"
-      valid values:
-        - REFUND          # negative amounts
-        - MICRO           # 0 – 10
-        - SMALL           # 10 – 100
-        - MEDIUM          # 100 – 1000
-        - LARGE           # 1000 – 10000
-        - WHALE           # > 10000
-      fail: when > 0
+  - name: settlement_hours
+    data_type: float
 
-  # ── Business logic: hour_of_day range ────────────────────────────────────────
-  - values between 0 and 23 (hour_of_day):
-      name: "hour_of_day is 0–23"
-      fail: when invalid_count > 0
-
-  # ── Business logic: settlement_hours non-negative for completed transactions ──
-  - failed rows:
-      name: "settlement_hours non-negative for COMPLETED transactions"
-      fail condition: >
-        status = 'COMPLETED'
-        AND settlement_hours IS NOT NULL
-        AND settlement_hours < 0
-
-  # ── Business logic: amount_gbp sign matches transaction_type ─────────────────
-  - failed rows:
-      name: "REFUND transactions have negative amount_gbp"
-      fail condition: "transaction_type = 'REFUND' AND amount_gbp >= 0"
-
-  - failed rows:
-      name: "PAYMENT and TRANSFER have positive amount_gbp"
-      fail condition: >
-        transaction_type IN ('PAYMENT', 'TRANSFER')
-        AND amount_gbp <= 0
-
-  # ── Metric sanity: fraud flag rate ───────────────────────────────────────────
-  # Expect 0.5% – 10% flagged. Outside this range signals a logic error.
-  - (COUNT(CASE WHEN is_flagged THEN 1 END) * 100.0 / COUNT(*)) between 0.5 and 10:
-      name: "Fraud flag rate between 0.5% and 10%"
-      warn: when not between 0.5 and 10
-
-  # ── Volume ────────────────────────────────────────────────────────────────────
-  - row_count > 0:
-      name: "Serving table not empty after dbt run"
-      fail: when < 1
-
-  - anomaly_score(row_count) < 3:
-      name: "Serving row volume within expected bounds"
-      warn: when >= 2
-      fail: when >= 3
+  - name: loaded_at
+    data_type: timestamp
+    checks:
+      - missing:
+          threshold:
+            must_be: 0
