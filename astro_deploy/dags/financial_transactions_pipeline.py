@@ -1,4 +1,3 @@
-
 # """
 # dags/financial_transactions_pipeline.py
 
@@ -183,29 +182,18 @@
 #     target = f"{QUARANTINE_DB}.{source_table.split('.')[-1]}_QUARANTINE"
 #     stats = []
 
+#     # Soda 4.x doesn't return failedRowsQuery in diagnostics.
+#     # Quarantine the latest partition (today's ingestion) for all failed checks.
 #     for check in scan_result["failed_checks"]:
-#         failed_row_sql = check["diagnostics"].get("failedRowsQuery")
-
-#         if failed_row_sql:
-#             insert_sql = f"""
-#                 INSERT INTO {target}
-#                 SELECT src.*, 
-#                     '{check["name"]}'          AS failed_check_name,
-#                     '{scan_result["scan_ts"]}'::TIMESTAMP AS quarantined_at,
-#                     CURRENT_TIMESTAMP()        AS inserted_at
-#                 FROM ({failed_row_sql}) src
-#             """
-#         else:
-#             # Volume / freshness checks: quarantine latest partition
-#             insert_sql = f"""
-#                 INSERT INTO {target}
-#                 SELECT src.*,
-#                     '{check["name"]}'          AS failed_check_name,
-#                     '{scan_result["scan_ts"]}'::TIMESTAMP AS quarantined_at,
-#                     CURRENT_TIMESTAMP()        AS inserted_at
-#                 FROM {source_table} src
-#                 WHERE ingested_at = (SELECT MAX(ingested_at) FROM {source_table})
-#             """
+#         insert_sql = f"""
+#             INSERT INTO {target}
+#             SELECT src.*,
+#                 '{check["name"]}'          AS failed_check_name,
+#                 '{scan_result["scan_ts"]}'::TIMESTAMP AS quarantined_at,
+#                 CURRENT_TIMESTAMP()        AS inserted_at
+#             FROM {source_table} src
+#             WHERE ingested_at = (SELECT MAX(ingested_at) FROM {source_table})
+#         """
 
 #         with hook.get_conn() as conn:
 #             cur = conn.cursor()
@@ -463,6 +451,7 @@
 
 #     # SERVING pass path
 #     serving_gate >> complete >> end
+
 
 
 
@@ -797,7 +786,16 @@ with DAG(
     def slack_raw_failure(payload: str) -> None:
         import requests
         webhook_url = _get_slack_webhook()
-        requests.post(webhook_url, data=payload, timeout=10)
+        log.info(f"Posting to Slack webhook (length: {len(webhook_url)})")
+        log.info(f"Payload: {payload[:200]}")
+        response = requests.post(
+            webhook_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=10
+        )
+        log.info(f"Slack response: {response.status_code} - {response.text}")
+        response.raise_for_status()
 
     raw_slack = slack_raw_failure(raw_alert_payload)
 
@@ -888,7 +886,16 @@ with DAG(
     def slack_serving_failure(payload: str) -> None:
         import requests
         webhook_url = _get_slack_webhook()
-        requests.post(webhook_url, data=payload, timeout=10)
+        log.info(f"Posting to Slack webhook (length: {len(webhook_url)})")
+        log.info(f"Payload: {payload[:200]}")
+        response = requests.post(
+            webhook_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=10
+        )
+        log.info(f"Slack response: {response.status_code} - {response.text}")
+        response.raise_for_status()
 
     serving_slack = slack_serving_failure(serving_alert_payload)
 
