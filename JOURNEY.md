@@ -110,6 +110,53 @@ The project's data quality layer is Soda Core. Halfway through the build, Soda C
 
 ---
 
+## dbt-fusion 2.0 YAML syntax migration
+
+Adding dbt tests to the project surfaced another version-related migration. dbt Cloud is on **dbt-fusion 2.0 (preview)** — the new dbt engine — which has stricter YAML validation than classic dbt:
+
+**Sources.yml:** `loaded_at_field` and `freshness` at the table level are deprecated. The new format wraps them in a `config:` block:
+
+```yaml
+# Old (classic dbt):
+- name: financial_transactions
+  loaded_at_field: ingested_at
+  freshness:
+    warn_after: { count: 2, period: hour }
+
+# New (dbt-fusion 2.0):
+- name: financial_transactions
+  config:
+    loaded_at_field: ingested_at
+    freshness:
+      warn_after: { count: 2, period: hour }
+```
+
+**Schema.yml tests:** generic test arguments like `values`, `field`, `to`, `min_value`, `max_value` must be nested under `arguments:`:
+
+```yaml
+# Old:
+tests:
+  - accepted_values:
+      values: ['PAYMENT', 'TRANSFER', 'REFUND']
+
+# New (dbt-fusion 2.0):
+tests:
+  - accepted_values:
+      arguments:
+        values: ['PAYMENT', 'TRANSFER', 'REFUND']
+```
+
+The error message from dbt-fusion was helpful — it explicitly named the deprecated key and pointed at the right line:
+
+```
+ERROR dbt1159: Deprecated test arguments: ["values"] at top-level detected.
+  --> models/silver/schema.yml:44:23
+```
+
+**What I'd say in an interview:** Two version-driven migrations on one project (Soda 3→4, dbt classic → fusion). Treating libraries as fixed dependencies is a luxury; in practice you'll be on a moving train and need to absorb breaking changes. Document them in the journey so the next engineer doesn't relearn.
+
+---
+
 ## The Slack webhook URL had trailing newlines
 
 A small bug that ate an evening. When I pasted the Slack webhook URL into the Airflow Variable, two trailing newlines came along for the ride. Soda's failure path showed the task `slack_raw_failure` going green with no errors — but no Slack message arrived in `#financial-dq-alerts`.
@@ -178,6 +225,8 @@ The CI gate runs Soda contracts on every PR. The non-obvious decision was: again
 
 This pattern keeps one set of contracts as the source of truth for both production and CI.
 
+**Verified end-to-end:** I tested the CI gate by deliberately adding a broken rule (`AMOUNT must be >= 999999`) to the bronze contract on a test branch. The CI workflow correctly failed and blocked the PR from merging.
+
 **The trade-off this creates:** the CI fixture goes stale when source schema evolves. I cover that with the hourly Snowflake schema-drift alert (see README). It's not perfect — there's a window between schema drift and fixture refresh — but the in-DAG bronze Soda check catches the same issue in production, so the two layers together cover the gap.
 
 ---
@@ -204,7 +253,28 @@ if dag_run_id:
         return
 ```
 
-This required propagating Airflow's run context into the task functions via `**context` — a small change but one that touches every audit-log call site.
+This required propagating Airflow's run context into the task functions via `**context` — a small change but one that touches every audit-log call site. **Forgetting to add `**context` to a function signature** caused a `NameError: name 'context' is not defined` runtime error that took two redeploys to track down. The lesson: Airflow's `context` is opt-in, never magically injected.
+
+---
+
+## Bronze audit log gap on the happy path
+
+Initially the audit log only got written from the failure path (the quarantine task wrote it) and from `pipeline_complete` (which wrote the gold audit row). On the happy path, the bronze check passing was not recorded.
+
+That meant the audit log gave you "every failure" but only partial "every success". For a true "every Soda scan recorded" property, the bronze pass needed its own audit row.
+
+The fix: add the bronze audit write at the start of `run_dbt_transform`. That task only runs when bronze has passed, so it's a natural place to record the bronze success before kicking off dbt.
+
+```python
+def run_dbt_transform(scan_result: dict, **context) -> str:
+    # Record the bronze pass in the audit log (idempotent).
+    hook = SnowflakeHook(snowflake_conn_id="snowflake_pipeline")
+    _write_audit_log(hook, scan_result, [], BRONZE_TABLE,
+                     dag_run_id=context["run_id"])
+    # ... then trigger dbt Cloud job
+```
+
+**What I'd say in an interview:** The original design had an asymmetry — failures were audited but passes were partially missed. That's the kind of gap that doesn't surface until you query the audit log and notice the math doesn't add up. The audit log should answer "what did the pipeline do" not just "what went wrong."
 
 ---
 
@@ -224,21 +294,100 @@ Three SQL statements implement the alert:
 
 ```sql
 CREATE NOTIFICATION INTEGRATION schema_drift_email ...;
-
-CREATE OR REPLACE ALERT schema_drift_alert
-  WAREHOUSE = PIPELINE_WH
-  SCHEDULE = '60 MINUTE'
-  IF (EXISTS (
-    SELECT column_name FROM ... WHERE table_schema = 'BRONZE'
-    EXCEPT
-    SELECT column_name FROM ... WHERE table_schema = 'BRONZE_CI'
-  ))
-  THEN CALL SYSTEM$SEND_EMAIL(...);
-
+CREATE OR REPLACE ALERT schema_drift_alert ...;
 ALTER ALERT schema_drift_alert RESUME;
 ```
 
 **What I'd say in an interview:** This is a good example of choosing simple over impressive. The Lambda architecture sounds better in a portfolio but the Snowflake ALERT solves the same problem with less surface area to maintain. Senior engineers know when *not* to over-engineer.
+
+---
+
+## Retention: Snowflake TASK, not external cron
+
+The `AUDIT.DATA_QUALITY_LOG` and `QUARANTINE.FINANCIAL_TRANSACTIONS_QUARANTINE` tables grow unbounded — every nightly run adds rows, and we never clean up. For a portfolio piece this is fine; for a real production system it's a latent storage problem.
+
+The fix is a Snowflake `TASK` running daily at 03:00 UTC (one hour after the main DAG) that:
+
+1. Copies rows older than 90 days into a parallel `*_ARCHIVE` table
+2. Deletes those rows from the live table
+
+```sql
+CREATE OR REPLACE TASK AUDIT.retention_cleanup
+  WAREHOUSE = PIPELINE_WH
+  SCHEDULE = 'USING CRON 0 3 * * * UTC'
+AS
+BEGIN
+  INSERT INTO AUDIT.DATA_QUALITY_LOG_ARCHIVE
+  SELECT * FROM AUDIT.DATA_QUALITY_LOG
+  WHERE created_at < DATEADD(day, -90, CURRENT_TIMESTAMP());
+
+  DELETE FROM AUDIT.DATA_QUALITY_LOG
+  WHERE created_at < DATEADD(day, -90, CURRENT_TIMESTAMP());
+  -- (same pattern for QUARANTINE)
+END;
+```
+
+Could this be a dbt incremental model or an Airflow task? Yes — but the data never leaves Snowflake, so the cleanup logic shouldn't either. A Snowflake TASK is the right level of abstraction.
+
+---
+
+## Remediation: manual cleanup, by design
+
+The quarantine task COPIES bad rows into `QUARANTINE.*` — it does NOT delete them from `BRONZE`. Initially I assumed the DAG should auto-clean bronze too, but on reflection the deletion needs human judgement:
+
+| Situation | Action |
+|---|---|
+| Source system sent wrong value (e.g. INVALID_TYPE should have been PAYMENT) | `UPDATE` with correct value |
+| Source sent duplicate (same transaction twice) | `DELETE` extras, keep original |
+| Row is genuinely garbage | `DELETE` |
+
+Auto-DELETE from BRONZE would be dangerous — a contract bug could wipe legitimate data. Production data engineers prefer the human-in-the-loop pattern: the pipeline isolates and alerts, the engineer decides how to fix.
+
+This is documented in the README's "Remediation workflow" section.
+
+---
+
+## Auto-deploy on merge: closing the GitOps loop
+
+The pipeline initially required a manual `astro deploy -f` after every merge. That worked but was a discipline rather than enforcement — easy to forget after the CI gate passed.
+
+Adding a GitHub Actions workflow that auto-runs `astro deploy` after merge to main closed the loop:
+
+```yaml
+on:
+  push:
+    branches: [main]
+    paths: ["astro_deploy/**"]
+
+steps:
+  - uses: actions/checkout@v4
+  - uses: astronomer/deploy-action@v0.9.0
+    with:
+      deployment-id: cmp93atnn6cez01oruyf4jv07
+      root-folder: astro_deploy/
+    env:
+      ASTRO_API_TOKEN: ${{ secrets.ASTRO_API_TOKEN }}
+```
+
+Now a merge to main triggers: deploy → cloud Airflow picks up new bundle (~60s). The local `astro deploy` workflow still exists for emergency one-off fixes, but the path of least resistance is now the proper GitOps flow.
+
+---
+
+## dbt tests alongside Soda: belt and braces
+
+Adding dbt tests felt at first like duplication of Soda. The distinction is real though:
+
+- **Soda enforces contracts** — "does the data have the shape and values we expect?"
+- **dbt tests enforce relationships** — "did the transformation preserve correctness?"
+
+Concretely:
+
+- Soda catches: nulls, duplicates, invalid enums, datatype drift — across both BRONZE and GOLD
+- dbt tests catch: `relationships()` between models (gold's transaction_id must exist in silver), `accepted_range()` for bounded numerics (hour 0-23), `unique` on derived keys
+
+A dbt model with a bug that drops 10% of rows still passes Soda's column checks on the surviving rows — but fails dbt's `relationships` test because gold rows reference non-existent silver rows. The two tools cover different failure modes.
+
+The tests run as part of the dbt Cloud job after `dbt run`. A test failure marks the dbt run as failed, which the Airflow `run_dbt_transform` task propagates as a task failure → Slack alert.
 
 ---
 
@@ -254,10 +403,18 @@ ALTER ALERT schema_drift_alert RESUME;
 
 5. **Document the deploy-variable distinction in Astronomer earlier.** Airflow Variable vs `AIRFLOW_VAR_*` env var burned an hour. A README note would have saved it.
 
+6. **Write `**context` into every Airflow task signature from the start.** Adding it ad-hoc when one task needs `context["run_id"]` led to the `pipeline_complete` bug. Better to make it standard kit on every `@task` declaration.
+
+7. **Test the happy path early and often.** Most of my testing focused on the failure path (`--inject-errors`). The first end-to-end happy-path run surfaced two bugs (`pipeline_complete` missing context, bronze audit gap on happy path). Both should have been caught earlier.
+
+8. **Audit the audit log itself.** I added bronze-on-pass to the audit log only after noticing it was missing from a SELECT query. There should be invariants on the audit log ("every dag_run_id has exactly N rows for a full happy run") that you can check periodically.
+
 ---
 
 ## What the journey teaches
 
-The architecture in the README is clean and reads as if it was designed up front. It wasn't. It is the product of three deliberate pivots (Terraform → CloudFormation, RAW/SERVING → medallion, MWAA → Astronomer) and a handful of smaller corrections. The cleanliness comes from being willing to delete bad work rather than work around it.
+The architecture in the README is clean and reads as if it was designed up front. It wasn't. It is the product of three deliberate pivots (Terraform → CloudFormation, RAW/SERVING → medallion, MWAA → Astronomer), two library version migrations (Soda 3→4, dbt classic → fusion), and a handful of smaller corrections (Slack newlines, Airflow context, audit log asymmetry).
 
-In an interview, the most useful thing this project demonstrates is not the final architecture but the engineering judgement behind each correction. Each pivot was a conscious decision to throw out work that wasn't earning its place. That instinct — to delete rather than patch — is the senior engineer move.
+The cleanliness comes from being willing to delete bad work rather than work around it. Every pivot was a conscious decision to throw out work that wasn't earning its place. That instinct — to delete rather than patch — is the senior engineer move.
+
+In an interview, the most useful thing this project demonstrates is not the final architecture but the engineering judgement behind each correction. Each pivot tells a story about reading the cost of staying vs the cost of switching and choosing well.
