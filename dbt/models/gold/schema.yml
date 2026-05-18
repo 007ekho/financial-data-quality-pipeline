@@ -1,7 +1,5 @@
 # dbt/models/gold/schema.yml
-# dbt tests for the gold fact table.
-# This is where business logic correctness gets enforced — derived columns,
-# bucket assignments, and the relationship to the upstream silver model.
+# dbt tests for the gold fact table (dbt-fusion 2.0 compatible syntax).
 
 version: 2
 
@@ -19,8 +17,9 @@ models:
           - not_null
           - unique
           - relationships:
-              to: ref('stg_financial_transactions')
-              field: transaction_id
+              arguments:
+                to: ref('stg_financial_transactions')
+                field: transaction_id
 
       - name: amount_gbp
         description: Transaction amount converted to GBP at daily FX rate.
@@ -39,15 +38,17 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: ['REFUND', 'MICRO', 'SMALL', 'MEDIUM', 'LARGE', 'WHALE']
+              arguments:
+                values: ['REFUND', 'MICRO', 'SMALL', 'MEDIUM', 'LARGE', 'WHALE']
 
       - name: hour_of_day
         description: Hour (0-23) when the transaction was initiated.
         tests:
           - not_null
           - dbt_utils.accepted_range:
-              min_value: 0
-              max_value: 23
+              arguments:
+                min_value: 0
+                max_value: 23
 
       - name: settlement_hours
         description: >
