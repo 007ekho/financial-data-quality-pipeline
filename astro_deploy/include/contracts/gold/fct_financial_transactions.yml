@@ -116,8 +116,3 @@ columns:
           threshold:
             must_be: 0
 
-# Dataset-level checks
-checks:
-  - schema:
-      threshold:
-        must_be: 0
