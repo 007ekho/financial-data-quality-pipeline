@@ -172,6 +172,10 @@ columns:
       - missing:
           threshold:
             must_be: 0
+      - invalid:
+          valid_min: 999999
+          threshold:
+            must_be: 0
 
   - name: CURRENCY
     data_type: varchar
