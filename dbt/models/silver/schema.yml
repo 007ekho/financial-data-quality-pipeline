@@ -1,7 +1,5 @@
 # dbt/models/silver/schema.yml
-# dbt tests for the silver staging model.
-# Soda enforces contracts against the underlying data; dbt tests enforce
-# transformation correctness — that this view returns the rows we expect.
+# dbt tests for the silver staging model (dbt-fusion 2.0 compatible syntax).
 
 version: 2
 
@@ -34,14 +32,16 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: ['PAYMENT', 'TRANSFER', 'REFUND']
+              arguments:
+                values: ['PAYMENT', 'TRANSFER', 'REFUND']
 
       - name: status
         description: COMPLETED, PENDING, FAILED, or REVERSED.
         tests:
           - not_null
           - accepted_values:
-              values: ['COMPLETED', 'PENDING', 'FAILED', 'REVERSED']
+              arguments:
+                values: ['COMPLETED', 'PENDING', 'FAILED', 'REVERSED']
 
       - name: currency
         description: ISO 4217 currency code.

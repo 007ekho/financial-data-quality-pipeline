@@ -1,7 +1,5 @@
 # dbt/models/silver/sources.yml
 # Source definitions and freshness checks for the BRONZE layer.
-# dbt source freshness fires before silver/gold models run.
-# If BRONZE hasn't received data in 6 hours, the DAG errors and alerts.
 
 version: 2
 
@@ -18,11 +16,12 @@ sources:
         description: >
           One row per financial transaction event.
           Snowpipe auto-ingests new .parquet files from S3 hourly.
-        loaded_at_field: ingested_at
-        freshness:
-          warn_after:
-            count: 2
-            period: hour
-          error_after:
-            count: 24
-            period: hour
+        config:
+          loaded_at_field: ingested_at
+          freshness:
+            warn_after:
+              count: 2
+              period: hour
+            error_after:
+              count: 24
+              period: hour
