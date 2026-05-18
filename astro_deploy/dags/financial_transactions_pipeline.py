@@ -91,7 +91,7 @@
 # def _get_slack_webhook() -> str:
 #     """Get Slack webhook URL from Airflow Variable."""
 #     from airflow.models import Variable
-#     return Variable.get("slack_webhook_url")
+#     return Variable.get("slack_webhook_url").strip()
 
 
 # def _get_dbt_creds() -> dict:
@@ -207,15 +207,33 @@
 
 
 # def _write_audit_log(hook: SnowflakeHook, scan_result: dict,
-#                      quarantine_stats: list, dataset: str) -> None:
+#                      quarantine_stats: list, dataset: str,
+#                      dag_run_id: str = None) -> None:
 #     status = "FAILED" if scan_result["failed"] > 0 else "PASSED"
 #     remediation = "PENDING" if status == "FAILED" else "NOT_REQUIRED"
+
+#     # Idempotency: skip if this (dag_run_id, checkpoint) is already logged.
+#     # Prevents duplicate audit rows when Airflow retries the task.
+#     if dag_run_id:
+#         check_sql = f"""
+#             SELECT COUNT(*) FROM {AUDIT_TABLE}
+#             WHERE dag_run_id = '{dag_run_id}'
+#               AND checkpoint = '{scan_result["checkpoint"]}'
+#         """
+#         with hook.get_conn() as conn:
+#             cur = conn.cursor()
+#             cur.execute(check_sql)
+#             if cur.fetchone()[0] > 0:
+#                 log.info("Audit log already written for run_id=%s checkpoint=%s — skipping insert.",
+#                          dag_run_id, scan_result["checkpoint"])
+#                 return
 
 #     # Use INSERT...SELECT because Snowflake disallows PARSE_JSON in VALUES.
 #     sql = f"""
 #         INSERT INTO {AUDIT_TABLE}
 #         (dataset_name, checkpoint, scan_ts, scan_status,
-#          failed_checks, quarantine_stats, remediation_status, created_at)
+#          failed_checks, quarantine_stats, remediation_status, created_at,
+#          dag_run_id)
 #         SELECT
 #             '{dataset}',
 #             '{scan_result["checkpoint"]}',
@@ -224,7 +242,8 @@
 #             PARSE_JSON('{json.dumps(scan_result["failed_checks"])}'),
 #             PARSE_JSON('{json.dumps(quarantine_stats)}'),
 #             '{remediation}',
-#             CURRENT_TIMESTAMP()
+#             CURRENT_TIMESTAMP(),
+#             '{dag_run_id or "manual"}'
 #     """
 #     with hook.get_conn() as conn:
 #         conn.cursor().execute(sql)
@@ -246,11 +265,22 @@
 #     start = EmptyOperator(task_id="start")
 
 #     # ── 1. Wait for Snowpipe to finish loading ─────────────────────────────────
-#     @task(task_id="wait_for_snowpipe")
+#     @task(
+#         task_id="wait_for_snowpipe",
+#         retries=3,
+#         retry_delay=timedelta(minutes=2),
+#         retry_exponential_backoff=True,
+#         max_retry_delay=timedelta(minutes=10),
+#     )
 #     def wait_for_snowpipe() -> str:
 #         """
 #         Poll SYSTEM$PIPE_STATUS until Snowpipe has no pending files.
 #         Returns the scan window timestamp once clear.
+
+#         Retry behaviour:
+#         - Up to 3 retries on transient failures (network, Snowflake hiccups)
+#         - Exponential backoff: 2min → 4min → 8min (capped at 10min)
+#         - Internal poll loop handles steady-state Snowpipe latency
 #         """
 #         import time
 #         hook = SnowflakeHook(snowflake_conn_id="snowflake_pipeline")
@@ -300,10 +330,10 @@
 
 #     # ── 4a. FAIL PATH: quarantine raw failures ─────────────────────────────────
 #     @task(task_id="quarantine_raw_failures")
-#     def quarantine_raw_failures(scan_result: dict) -> dict:
+#     def quarantine_raw_failures(scan_result: dict, **context) -> dict:
 #         hook = SnowflakeHook(snowflake_conn_id="snowflake_pipeline")
 #         stats = _quarantine_rows(hook, scan_result, BRONZE_TABLE)
-#         _write_audit_log(hook, scan_result, stats, BRONZE_TABLE)
+#         _write_audit_log(hook, scan_result, stats, BRONZE_TABLE, dag_run_id=context["run_id"])
 #         return {"quarantine_stats": stats, "scan_result": scan_result}
 
 #     raw_quarantine = quarantine_raw_failures(raw_scan)
@@ -344,7 +374,11 @@
 #     raw_stop = EmptyOperator(task_id="raw_pipeline_stopped")
 
 #     # ── 4b. PASS PATH: run dbt transform ──────────────────────────────────────
-#     @task(task_id="run_dbt_transform")
+#     @task(
+#         task_id="run_dbt_transform",
+#         retries=2,
+#         retry_delay=timedelta(minutes=3),
+#     )
 #     def run_dbt_transform() -> str:
 #         """
 #         Trigger dbt Cloud job via API, or run dbt Core CLI locally.
@@ -400,10 +434,10 @@
 
 #     # ── 7a. Quarantine serving failures ───────────────────────────────────────
 #     @task(task_id="quarantine_serving_failures")
-#     def quarantine_serving_failures(scan_result: dict) -> dict:
+#     def quarantine_serving_failures(scan_result: dict, **context) -> dict:
 #         hook = SnowflakeHook(snowflake_conn_id="snowflake_pipeline")
 #         stats = _quarantine_rows(hook, scan_result, GOLD_TABLE)
-#         _write_audit_log(hook, scan_result, stats, GOLD_TABLE)
+#         _write_audit_log(hook, scan_result, stats, GOLD_TABLE, dag_run_id=context["run_id"])
 #         return {"quarantine_stats": stats, "scan_result": scan_result}
 
 #     serving_quarantine = quarantine_serving_failures(serving_scan)
@@ -445,7 +479,7 @@
 #     @task(task_id="pipeline_complete")
 #     def pipeline_complete(scan_result: dict) -> None:
 #         hook = SnowflakeHook(snowflake_conn_id="snowflake_pipeline")
-#         _write_audit_log(hook, scan_result, [], GOLD_TABLE)
+#         _write_audit_log(hook, scan_result, [], GOLD_TABLE, dag_run_id=context["run_id"])
 #         log.info("Pipeline complete. All quality gates passed. ✓")
 
 #     complete = pipeline_complete(serving_scan)
@@ -469,8 +503,6 @@
 
 #     # SERVING pass path
 #     serving_gate >> complete >> end
-
-
 
 
 
@@ -572,7 +604,13 @@ def _get_snowflake_conn() -> dict:
 
 
 def _get_slack_webhook() -> str:
-    """Get Slack webhook URL from Airflow Variable."""
+    """Get Slack webhook URL from environment or Airflow Variable."""
+    import os
+    # Try env var first (set via Astronomer deployment variable AIRFLOW_VAR_*)
+    url = os.environ.get("AIRFLOW_VAR_SLACK_WEBHOOK_URL")
+    if url:
+        return url.strip()
+    # Fall back to Airflow Variable
     from airflow.models import Variable
     return Variable.get("slack_webhook_url").strip()
 
