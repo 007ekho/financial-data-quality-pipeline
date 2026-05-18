@@ -1,0 +1,47 @@
+# .github/workflows/deploy_astronomer.yml
+# Auto-deploys the astro_deploy project to Astronomer cloud when:
+#   - Code is merged to main
+#   - The change touches astro_deploy/, dbt/, or contracts
+#
+# Requires:
+#   - ASTRO_API_TOKEN secret (deployment token from `astro deployment token create`)
+
+name: Deploy to Astronomer
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "astro_deploy/**"
+      - "dbt/**"
+
+jobs:
+  deploy:
+    name: Astro deploy (production)
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - name: Install Astro CLI
+        run: |
+          curl -sSL https://install.astronomer.io | sudo bash -s
+
+      - name: Deploy to Astronomer
+        working-directory: astro_deploy
+        run: |
+          astro deploy cmp93atnn6cez01oruyf4jv07 -f
+        env:
+          ASTRO_API_TOKEN: ${{ secrets.ASTRO_API_TOKEN }}
+
+      - name: Post deploy status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Astronomer deploy succeeded"
+          else
+            echo "❌ Astronomer deploy failed — manual intervention required"
+            exit 1
+          fi
