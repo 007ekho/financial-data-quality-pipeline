@@ -1,0 +1,60 @@
+# dbt/models/gold/schema.yml
+# dbt tests for the gold fact table.
+# This is where business logic correctness gets enforced — derived columns,
+# bucket assignments, and the relationship to the upstream silver model.
+
+version: 2
+
+models:
+  - name: fct_financial_transactions
+    description: >
+      Business-ready transaction fact table. FX-normalised amounts,
+      bucketed by amount magnitude, with settlement timing.
+      Built nightly from stg_financial_transactions (silver).
+    columns:
+
+      - name: transaction_id
+        description: Primary key. Carried through from silver unchanged.
+        tests:
+          - not_null
+          - unique
+          - relationships:
+              to: ref('stg_financial_transactions')
+              field: transaction_id
+
+      - name: amount_gbp
+        description: Transaction amount converted to GBP at daily FX rate.
+        tests:
+          - not_null
+
+      - name: transaction_date
+        description: Date portion of initiated_at. Used as the clustering key.
+        tests:
+          - not_null
+
+      - name: amount_bucket
+        description: >
+          Categorised by amount magnitude. REFUND for any refund regardless
+          of size, then MICRO/SMALL/MEDIUM/LARGE/WHALE based on amount_gbp.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['REFUND', 'MICRO', 'SMALL', 'MEDIUM', 'LARGE', 'WHALE']
+
+      - name: hour_of_day
+        description: Hour (0-23) when the transaction was initiated.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 23
+
+      - name: settlement_hours
+        description: >
+          Hours between initiated_at and settled_at.
+          NULL for transactions not yet settled.
+
+      - name: loaded_at
+        description: When dbt materialised this row.
+        tests:
+          - not_null
