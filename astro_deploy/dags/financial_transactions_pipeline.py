@@ -477,7 +477,7 @@
 
 #     # ── 7b. All passed ────────────────────────────────────────────────────────
 #     @task(task_id="pipeline_complete")
-#     def pipeline_complete(scan_result: dict) -> None:
+#     def pipeline_complete(scan_result: dict, **context) -> None:
 #         hook = SnowflakeHook(snowflake_conn_id="snowflake_pipeline")
 #         _write_audit_log(hook, scan_result, [], GOLD_TABLE, dag_run_id=context["run_id"])
 #         log.info("Pipeline complete. All quality gates passed. ✓")
@@ -998,7 +998,7 @@ with DAG(
 
     # ── 7b. All passed ────────────────────────────────────────────────────────
     @task(task_id="pipeline_complete")
-    def pipeline_complete(scan_result: dict) -> None:
+    def pipeline_complete(scan_result: dict, **context) -> None:
         hook = SnowflakeHook(snowflake_conn_id="snowflake_pipeline")
         _write_audit_log(hook, scan_result, [], GOLD_TABLE, dag_run_id=context["run_id"])
         log.info("Pipeline complete. All quality gates passed. ✓")
