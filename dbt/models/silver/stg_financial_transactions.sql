@@ -34,7 +34,7 @@ WITH source AS (
         source_system::VARCHAR                           AS source_system,
         ingested_at::TIMESTAMP_NTZ                       AS ingested_at
 
-    FROM {{ var('database') }}.BRONZE.FINANCIAL_TRANSACTIONS
+    FROM {{ source('bronze', 'financial_transactions') }}
 
 ),
 

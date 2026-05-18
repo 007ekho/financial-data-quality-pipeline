@@ -1,3 +1,63 @@
+# # contracts/gold/fct_financial_transactions.yml
+# # Soda Core 4.x data contract for GOLD.FCT_FINANCIAL_TRANSACTIONS
+
+# dataset: snowflake_gold/GOLD/FCT_FINANCIAL_TRANSACTIONS
+
+# columns:
+#   - name: TRANSACTION_ID
+#     data_type: varchar
+#     checks:
+#       - missing:
+#           threshold:
+#             must_be: 0
+#       - duplicate:
+#           threshold:
+#             must_be: 0
+
+#   - name: AMOUNT_GBP
+#     data_type: float
+#     checks:
+#       - missing:
+#           threshold:
+#             must_be: 0
+
+#   - name: TRANSACTION_DATE
+#     data_type: date
+#     checks:
+#       - missing:
+#           threshold:
+#             must_be: 0
+
+#   - name: AMOUNT_BUCKET
+#     data_type: varchar
+#     checks:
+#       - missing:
+#           threshold:
+#             must_be: 0
+#       - invalid:
+#           valid_values: [REFUND, MICRO, SMALL, MEDIUM, LARGE, WHALE]
+#           threshold:
+#             must_be: 0
+
+#   - name: HOUR_OF_DAY
+#     data_type: integer
+#     checks:
+#       - missing:
+#           threshold:
+#             must_be: 0
+
+#   - name: SETTLEMENT_HOURS
+#     data_type: float
+
+#   - name: LOADED_AT
+#     data_type: timestamp
+#     checks:
+#       - missing:
+#           threshold:
+#             must_be: 0
+
+
+
 # contracts/gold/fct_financial_transactions.yml
 # Soda Core 4.x data contract for GOLD.FCT_FINANCIAL_TRANSACTIONS
 
@@ -55,3 +115,4 @@ columns:
       - missing:
           threshold:
             must_be: 0
+
