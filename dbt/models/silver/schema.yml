@@ -1,0 +1,59 @@
+# dbt/models/silver/schema.yml
+# dbt tests for the silver staging model.
+# Soda enforces contracts against the underlying data; dbt tests enforce
+# transformation correctness — that this view returns the rows we expect.
+
+version: 2
+
+models:
+  - name: stg_financial_transactions
+    description: >
+      Silver staging view over BRONZE.FINANCIAL_TRANSACTIONS.
+      Type-cast, deduplicated (via downstream materialisation), and excludes
+      any rows currently sitting in QUARANTINE.
+    columns:
+
+      - name: transaction_id
+        description: Unique transaction identifier from the source system.
+        tests:
+          - not_null
+          - unique
+
+      - name: account_id
+        description: The originating account for this transaction.
+        tests:
+          - not_null
+
+      - name: counterparty_id
+        description: The counterparty account.
+        tests:
+          - not_null
+
+      - name: transaction_type
+        description: PAYMENT, TRANSFER, or REFUND.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['PAYMENT', 'TRANSFER', 'REFUND']
+
+      - name: status
+        description: COMPLETED, PENDING, FAILED, or REVERSED.
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['COMPLETED', 'PENDING', 'FAILED', 'REVERSED']
+
+      - name: currency
+        description: ISO 4217 currency code.
+        tests:
+          - not_null
+
+      - name: amount
+        description: Transaction amount in original currency.
+        tests:
+          - not_null
+
+      - name: ingested_at
+        description: Timestamp when Snowpipe loaded the row.
+        tests:
+          - not_null
