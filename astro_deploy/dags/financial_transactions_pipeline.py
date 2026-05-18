@@ -89,7 +89,13 @@
 
 
 # def _get_slack_webhook() -> str:
-#     """Get Slack webhook URL from Airflow Variable."""
+#     """Get Slack webhook URL from environment or Airflow Variable."""
+#     import os
+#     # Try env var first (set via Astronomer deployment variable AIRFLOW_VAR_*)
+#     url = os.environ.get("AIRFLOW_VAR_SLACK_WEBHOOK_URL")
+#     if url:
+#         return url.strip()
+#     # Fall back to Airflow Variable
 #     from airflow.models import Variable
 #     return Variable.get("slack_webhook_url").strip()
 
@@ -508,11 +514,6 @@
 
 
 
-
-
-
-
-
 """
 dags/financial_transactions_pipeline.py
 
@@ -900,11 +901,19 @@ with DAG(
         retries=2,
         retry_delay=timedelta(minutes=3),
     )
-    def run_dbt_transform() -> str:
+    def run_dbt_transform(scan_result: dict, **context) -> str:
         """
         Trigger dbt Cloud job via API, or run dbt Core CLI locally.
         Returns job run ID / completion timestamp.
+
+        Also writes the bronze PASSED audit log entry — every Soda scan
+        must be recorded, not just the failures.
         """
+        # First: record the bronze pass in the audit log (idempotent).
+        hook = SnowflakeHook(snowflake_conn_id="snowflake_pipeline")
+        _write_audit_log(hook, scan_result, [], BRONZE_TABLE,
+                         dag_run_id=context["run_id"])
+
         import requests, time
 
         creds    = _get_dbt_creds()
@@ -935,7 +944,7 @@ with DAG(
 
         raise Exception(f"dbt run {run_id} did not complete within 20 minutes")
 
-    dbt_done = run_dbt_transform()
+    dbt_done = run_dbt_transform(raw_scan)
 
     # ── 5. Soda check: SERVING layer ──────────────────────────────────────────
     @task(task_id="soda_check_serving")
@@ -998,7 +1007,7 @@ with DAG(
 
     # ── 7b. All passed ────────────────────────────────────────────────────────
     @task(task_id="pipeline_complete")
-    def pipeline_complete(scan_result: dict, **context) -> None:
+    def pipeline_complete(scan_result: dict) -> None:
         hook = SnowflakeHook(snowflake_conn_id="snowflake_pipeline")
         _write_audit_log(hook, scan_result, [], GOLD_TABLE, dag_run_id=context["run_id"])
         log.info("Pipeline complete. All quality gates passed. ✓")
@@ -1024,6 +1033,3 @@ with DAG(
 
     # SERVING pass path
     serving_gate >> complete >> end
-
-
-    # hello world
