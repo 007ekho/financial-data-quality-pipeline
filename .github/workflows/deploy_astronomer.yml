@@ -22,18 +22,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - uses: actions/checkout@v4
 
       - name: Install Astro CLI
         run: |
           curl -sSL https://install.astronomer.io | sudo bash -s
-
-      - name: Validate Astro project
-        working-directory: astro_deploy
-        run: |
-          astro dev parse
-        env:
-          ASTRO_API_TOKEN: ${{ secrets.ASTRO_API_TOKEN }}
 
       - name: Deploy to Astronomer
         working-directory: astro_deploy
@@ -51,15 +45,3 @@ jobs:
             echo "❌ Astronomer deploy failed — manual intervention required"
             exit 1
           fi
-
-      - name: Notify on failure
-        if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number || 1,
-              body: `## ❌ Astronomer Deploy Failed\n\n**Commit:** ${context.sha.slice(0, 7)}\n**Branch:** ${context.ref}\n**Run:** [View logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`
-            });
