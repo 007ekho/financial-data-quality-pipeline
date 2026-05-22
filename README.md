@@ -492,6 +492,10 @@ ORDER BY created_at DESC;
 
 ---
 
+## Connect
+- LinkedIn: https://www.linkedin.com/in/suehi/
+- GitHub: https://github.com/007ekho
+
 ## License
 
 MIT
